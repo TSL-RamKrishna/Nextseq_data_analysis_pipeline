@@ -1,0 +1,358 @@
+#!/usr/bin/env rake
+
+ENV["R1"] ? @read1 = ENV["R1"] : nil
+@read1 ? @R1_basename  = "#{@read1}".split(".")[0].split("/")[-1] : nil
+
+ENV["R2"] ? @read2 = ENV["R2"] : nil
+@read2 ? @R2_basename = "#{@read2}".split(".")[0].split("/")[-1] : nil
+
+ENV["samplename"] ? @sample=ENV["samplename"] : nil
+ENV["sampleid"] ? @sampleid=ENV["sampleid"] : nil
+ENV["reference"] ? @reference=ENV["reference"] : nil
+
+
+directory  "results"
+
+
+namespace :fastqc  do
+  desc "Do fastqc quality check of the input data reads"
+  directory  "results/#{@sample}"
+  desc "do fastqc for R1"
+
+  file "results/#{@sample}/#{@R1_basename}_fastqc.html" => [ "results/#{@sample}", "#{@read1}"] do
+    sh "source fastqc-0.11.5; fastqc -outdir results/#{@sample} -extract #{@read1}"
+  end
+  file "results/#{@sample}/#{@R1_basename}_fastqc.zip" => [ "results/#{@sample}", "#{@read1}"] do
+  end
+  file "results/#{@sample}/#{@R1_basename}_fastqc" => [ "results/#{@sample}", "#{@read1}"] do
+  end
+
+  task :R1 => ["results/#{@sample}/#{@R1_basename}_fastqc.html", "results/#{@sample}/#{@R1_basename}_fastqc.zip", "results/#{@sample}/#{@R1_basename}_fastqc"] do
+    puts "R1 FASTQC completed"
+  end
+
+  desc "do fastqc for R2"
+  file "results/#{@sample}/#{@R2_basename}_fastqc.html" => [ "results/#{@sample}", "#{@read2}"] do
+    sh "source fastqc-0.11.5;fastqc -outdir results/#{@sample} -extract #{@read2}"
+  end
+  file "results/#{@sample}/#{@R2_basename}_fastqc.zip" => [ "results/#{@sample}", "#{@read2}"] do
+  end
+  file "results/#{@sample}/#{@R2_basename}_fastqc" => [ "results/#{@sample}", "#{@read2}"] do
+  end
+
+  task :R2 => ["results/#{@sample}/#{@R2_basename}_fastqc.html", "results/#{@sample}/#{@R2_basename}_fastqc.zip", "results/#{@sample}/#{@R2_basename}_fastqc"] do
+    puts "R2 FASTQC completed"
+  end
+
+  task :runR1 => [ :R1] do
+  end
+
+  task :runR2 => [ :R2] do
+  end
+
+  task :run => [ :R1, "R2"] do
+  end
+end
+
+
+namespace :trimmomatic do
+  desc "Runs Trimmomati c quality trimming tool"
+
+  file "results/#{@sample}/#{@R1_basename}.fastq" => ["#{@read1}"] do
+    sh "source trimmomatic-0.36; source jre-1.7.0.11; trimmomatic SE -threads 2 -phred33 -trimlog results/#{@sample}/trimmomatic.log -quiet #{@read1} results/#{@sample}/#{@R1_basename}.fastq ILLUMINACLIP:/tsl/software/testing/trimmomatic/0.36/x86_64/share/trimmomatic/adapters/ilmn_adapters.fa:2:30:10 SLIDINGWINDOW:10:20 MINLEN:50"
+  end
+
+  file "results/#{@sample}/#{@R1_basename}_paired.fastq" => ["#{@read1}", "#{@read2}"] do
+    sh "source trimmomatic-0.36; source jre-1.7.0.11; trimmomatic PE -threads 2 -phred33 -trimlog results/#{@sample}/trimmomatic.log -quiet #{@read1} #{@read2} results/#{@sample}/#{@R1_basename}_paired.fastq results/#{@sample}/#{@R1_basename}_unpaired.fastq results/#{@sample}/#{@R2_basename}_paired.fastq results/#{@sample}/#{@R2_basename}_unpaired.fastq ILLUMINACLIP:/tsl/software/testing/trimmomatic/0.36/x86_64/share/trimmomatic/adapters/ilmn_adapters.fa:2:30:10 SLIDINGWINDOW:10:20 MINLEN:50"
+  end
+
+  file "results/#{@sample}/#{@R2_basename}_paired.fastq" => ["#{@read1}", "#{@read2}"] do
+  end
+
+
+  task :runSE => ["results/#{@sample}/#{@R1_basename}.fastq"] do
+    puts "Trimmomatic completed"
+  end
+
+  task :runPE => ["results/#{@sample}/#{@R1_basename}_paired.fastq", "results/#{@sample}/#{@R2_basename}_paired.fastq" ] do
+  end
+
+end
+
+
+
+
+namespace :BWAindex do
+  desc "Creates BWA reference index"
+
+  file "#{@reference}.amb" => ["#{@reference}"] do
+    sh "source bwa-0.7.15; bwa index #{@reference}"
+  end
+
+  file "#{@reference}.ann" => ["#{@reference}"] do
+  end
+
+  file "#{@reference}.bwt" => ["#{@reference}"] do
+  end
+
+  file "#{@reference}.pac" => ["#{@reference}"] do
+  end
+
+  file "#{@reference}.sa" => ["#{@reference}"] do
+  end
+
+  task :run => ["#{@reference}.amb", "#{@reference}.ann", "#{@reference}.bwt", "#{@reference}.pac", "#{@reference}.sa"] do
+    puts "Reference indexing completed"
+  end
+end
+
+namespace :BWA do
+  desc "Runs BWA alignment of reads to the reference"
+  file "results/#{@sample}/aligned.sam" => ["results/#{@sample}/#{@R1_basename}_paired.fastq"] do
+    sh "source bwa-0.7.15; bwa mem -t 3 #{@reference} results/#{@sample}/#{@R1_basename}_paired_trimmed.fastq  1>results/#{@sample}/aligned.sam 2>results/#{@sample}/bwa_align.log;"
+  end
+
+  task :run => ["BWAindex:run", "results/#{@sample}/aligned.sam"] do
+    puts "bwa alignment completed"
+  end
+end
+
+
+namespace :BowtieIndex do
+ file "#{@reference}.1.bt2" => ["#{@reference}"] do
+   sh "source bowtie2-2.1.0;  bowtie2-build -f   #{@reference}  #{@reference} "
+ end
+ file "#{@reference}.2.bt2" => ["#{@reference}"] do
+ end
+ file "#{@reference}.3.bt2" => ["#{@reference}"] do
+ end
+ file "#{@reference}.4.bt2" => ["#{@reference}"] do
+ end
+ file "#{@reference}.rev.1.bt2" => ["#{@reference}"] do
+ end
+ file "#{@reference}.rev.2.bt2" => ["#{@reference}"] do
+ end
+
+ task :run => ["#{@reference}.1.bt2", "#{@reference}.2.bt2", "#{@reference}.3.bt2", "#{@reference}.4.bt2", "#{@reference}.rev.1.bt2", "#{@reference}.rev.2.bt2" ] do
+   puts "Bowtie reference indexing completed"
+ end
+end
+
+namespace :Bowtie do
+ file "results/#{@sample}/#{@sampleid}_aligned.sam" => ["#{@reference}", "results/#{@sample}/#{@R1_basename}.fastq"] do
+  sh "source bowtie2-2.1.0; bowtie2 -q --phred33 -k 1 --reorder --very-sensitive-local --no-unal --rg-id #{@sampleid} --rg \"platform:Illumina\" --no-unal -x #{@reference} -U  results/#{@sample}/#{@R1_basename}_paired.fastq -S results/#{@sample}/#{@sampleid}_aligned.sam 2> results/#{@sample}/#{@sampleid}_aligned.log; "
+ end
+
+ file "results/#{@sample}/#{@sampleid}_paired_aligned.sam" => ["#{@reference}", "results/#{@sample}/#{@R1_basename}_paired.fastq",  "results/#{@sample}/#{@R2_basename}_paired.fastq"] do
+  sh "source bowtie2-2.1.0; bowtie2 -q --phred33 -k 1 --reorder --very-sensitive-local --no-unal --rg-id #{@sampleid} --rg \"platform:Illumina\" --no-unal -x #{@reference} -1 results/#{@sample}/#{@R1_basename}_paired.fastq -2 results/#{@sample}/#{@R2_basename}_paired.fastq -S results/#{@sample}/#{@sampleid}_aligned.sam 2> results/#{@sample}/#{@sampleid}_aligned.log; "
+ end
+
+ task :runSE => ["BowtieIndex:run", "results/#{@sample}/#{@sampleid}_aligned.sam"] do
+   puts "Bowtie mapping completed"
+ end
+
+ task :runPE => ["BowtieIndex:run", "results/#{@sample}/#{@sampleid}_paired_aligned.sam"] do
+   puts "Bowtie mapping completed"
+ end
+
+
+end
+
+
+
+namespace :samtools do
+  desc "create dict of reference"
+
+  file "#{@reference}.dict" => ["#{@reference}"] do
+    system "source samtools-1.3.1; samtools dict #{@reference} > #{@reference}.dict"
+  end
+  desc "Index the reference sequence"
+  file "#{@reference}.fai" => ["#{@reference}"] do
+    system "source samtools-1.3.1; samtools faidx #{@reference} > #{@reference}.fai"
+  end
+  desc "convert sam to bam"
+  file "results/#{@sample}/#{@sampleid}_aligned.bam" => ["#{@reference}.dict"] do
+    system "source samtools-1.3.1; samtools view -bS -t #{@reference}.dict -o results/#{@sample}/#{@sampleid}_aligned.bam results/#{@sample}/#{@sampleid}_aligned.sam "
+  end
+
+  desc "sort BAM file"
+  file "results/#{@sample}/#{@sampleid}_alignedSorted.bam" => ["results/#{@sample}/#{@sampleid}_aligned.bam"] do
+    system "source samtools-1.3.1; samtools sort --reference #{@reference} -o results/#{@sample}/#{@sampleid}_alignedSorted.bam results/#{@sample}/#{@sampleid}_aligned.bam "
+  end
+
+  desc "Index BAM file"
+  file "results/#{@sample}/#{@sampleid}_alignedSorted.bam.bai" => ["results/#{@sample}/#{@sampleid}_alignedSorted.bam"] do
+    system "source samtools-1.3.1; samtools index -b results/#{@sample}/#{@sampleid}_alignedSorted.bam results/#{@sample}/#{@sampleid}_alignedSorted.bam.bai"
+  end
+
+  desc "Convert  BAM TO BED"
+  file "results/#{@sample}/#{@sampleid}_alignedSorted.bed" => ["results/#{@sample}/#{@sampleid}_alignedSorted.bam"] do
+    sh "source bedtools-2.20.1; bedtools bamtobed -i results/#{@sample}/#{@sampleid}_alignedSorted.bam > results/#{@sample}/#{@sampleid}_alignedSorted.bed"
+  end
+
+  #desc "Get bedCov from bed file"
+  #file "results/#{@sample}/#{@sampleid}_alignedSorted.bedCov" => ["results/#{@sample}/#{@sampleid}_alignedSorted.bed", "results/#{@sample}/#{@sampleid}_alignedSorted.bam"] do
+  #  sh "source samtools-1.3.1; samtools bedcov -Q 20 results/#{@sample}/#{@sampleid}_alignedSorted.bed results/#{@sample}/#{@sampleid}_alignedSorted.bam > results/#{@sample}/#{@sampleid}_alignedSorted.bedCov"
+  #end
+
+  file "results/#{@sample}/#{@sampleid}_alignedSorted.genomecov.bed" => ["results/#{@sample}/#{@sampleid}_alignedSorted.bam"] do
+    sh "source bedtools-2.20.1; bedtools genomecov -d -ibam results/#{@sample}/#{@sampleid}_alignedSorted.bam | awk '{if($3>=1){print}}' > results/#{@sample}/#{@sampleid}_alignedSorted.genomecov.bed"
+  end
+
+  desc "create mpileup from the bam file"
+  file "results/#{@sample}/#{@sampleid}_alignedSorted.vcf" => ["results/#{@sample}/#{@sampleid}_alignedSorted.bam", "#{@reference}"] do
+    #sh "samtools mpileup -q 20 -Q 15 -d #{@depth} -Bf #{@reference} results/#{@sample}/alignSorted.bam > #{@outdir}/#{@sampleid}_alignedSorted.pileup 2>> #{@outdir}/rake_log.txt"
+    sh "source samtools-1.3.1; samtools mpileup -f #{@reference} results/#{@sample}/#{@sampleid}_alignedSorted.bam -C 20 -d 250 -q 20 -Q 13 -O -s --output results/#{@sample}/#{@sampleid}_alignedSorted.vcf"
+ end
+
+
+  task :sambam => ["results/#{@sample}/#{@sampleid}_aligned.bam", "results/#{@sample}/#{@sampleid}_alignedSorted.bam", "results/#{@sample}/#{@sampleid}_alignedSorted.bam.bai"] do
+    puts "samtools conversion SAM -> BAM, Sort BAM and Index BAM completed"
+  end
+
+  task :bedCoverage => ["results/#{@sample}/#{@sampleid}_alignedSorted.bed", "results/#{@sample}/#{@sampleid}_alignedSorted.genomecov.bed"] do
+    puts "BedCoverage completed"
+  end
+
+  task :mpileup => ["results/#{@sample}/#{@sampleid}_alignedSorted.vcf"] do
+    puts "mpileup completed"
+  end
+
+  #Sample individual file sam to bam
+  task :run => [ :sambam] do #not running bedcoverage and mpileup
+    puts "Samtools analysis completed"
+  end
+
+
+  #merging multiple bam files from same sample, sort and index
+  directory "results/#{@sampleid}"
+  file "results/#{@sampleid}/aligned_merged.bam" => ["results/#{@sampleid}"] do
+    system "bash merge_bamfiles.sh #{@sampleid} #{@reference}"
+
+  end
+
+  file "results/#{@sampleid}/aligned_merged_sorted.bam" => ["results/#{@sampleid}/aligned_merged.bam"] do
+    system "source samtools-1.3.1; samtools sort --reference #{@reference} -o results/#{@sampleid}/aligned_merged_sorted.bam results/#{@sampleid}/aligned_merged.bam "
+  end
+
+  file "results/#{@sampleid}/aligned_merged_sorted.bam.bai" => ["results/#{@sampleid}/aligned_merged_sorted.bam"] do
+    system "source samtools-1.3.1; samtools index -b results/#{@sampleid}/aligned_merged_sorted.bam results/#{@sampleid}/aligned_merged_sorted.bam.bai"
+  end
+
+  task :merge_bams => [ "results/#{@sampleid}/aligned_merged.bam" ] do
+    puts "#{@sampleid} merge completed"
+  end
+
+  task :merge_sorted_bam => [ "results/#{@sampleid}/aligned_merged_sorted.bam" ] do
+    puts "Merge of the combined BAM completed"
+  end
+
+  task :index_merged_sorted_bam => "results/#{@sampleid}/aligned_merged_sorted.bam.bai" do
+    puts "Merged BAM file indexed"
+  end
+
+
+
+  task :multiple_merge => [:merge_bams, :merge_sorted_bam, :index_merged_sorted_bam] do
+    puts "#{@sampleid} Bam files merged, sorted and indexed"
+  end
+
+end
+
+namespace :gene_exon_read_count do
+  reference_faidx="#{@reference}" + ".fai"
+  file "#{reference_faidx}" => ["#{@reference}"] do
+
+    sh "source samtools-1.3.1; samtools faidx #{@reference}"
+  end
+
+  file "results/#{@sample}/sample_bait_coverage_breadth_result.csv" => ["#{reference_faidx}"] do
+    sh "source samtools-1.3.1; source python-2.7.11; python scripts/calculate_depth_breadth_per_bait.py --reference #{reference_faidx} --genomecov results/#{@sample}/alignedSorted.genomecov.bed --baitregion lib/Captured_genes_coordinates_sorted.bed --bam results/#{@sample}/alignedSorted.bam --meancovfactor 0.2 --baitlengthfactor 0.8 > results/#{@sample}/sample_bait_coverage_breadth_result.csv"
+  end
+
+  #file "results/#{@sample}/bait_read_count.csv" => ["results/#{@sample}/alignedSorted.bam"] do
+  #  sh "source python-2.7.11; python scripts/get_read_count.py --bam results/#{@sample}/alignedSorted.bam --listregions lib/Captured_genes_coordinates_sorted.bed > results/#{@sample}/bait_read_count.csv"
+  #end
+
+  file "results/#{@sample}/exon_mean_read_count.csv" => ["results/#{@sample}/alignedSorted.bam"] do
+    sh "source python-2.7.11; python scripts/get_read_count.py --bam results/#{@sample}/alignedSorted.bam --exons --listregions lib/gene_exons_coordinates.txt > results/#{@sample}/exon_mean_read_count.csv"
+  end
+
+  #task :add_read_count => ["results/#{@sample}/sample_bait_coverage_breadth_result.csv", "results/#{@sample}/bait_read_count.csv"] do
+  #  sh "paste results/#{@sample}/sample_bait_coverage_breadth_result.csv results/#{@sample}/bait_read_count.csv | sed  -e 's/\t/,/g' > results/#{@sample}/TEMP; rm results/#{@sample}/bait_read_count.csv; mv results/#{@sample}/TEMP results/#{@sample}/sample_bait_coverage_breadth_result.csv"
+  #end
+
+  #task :add_exon_mean_read_count => ["results/#{@sample}/sample_bait_coverage_breadth_result.csv", "results/#{@sample}/exon_mean_read_count.csv"] do
+  #  sh "paste results/#{@sample}/sample_bait_coverage_breadth_result.csv results/#{@sample}/exon_mean_read_count.csv | sed  -e 's/\t/,/g' > results/#{@sample}/TEMP;  mv results/#{@sample}/TEMP results/#{@sample}/sample_bait_coverage_breadth_result.csv"
+  #end
+
+  task :run => ["samtools:run", "results/#{@sample}/sample_bait_coverage_breadth_result.csv", "results/#{@sample}/exon_mean_read_count.csv"] do
+    puts "Negative controls obtained"
+  end
+
+
+end
+
+
+
+
+task :merge_sample_baits do
+  sh "if [ -e results/coverage_breadth_per_bait_per_sample.csv ]; then echo deleting the file results/coverage_breadth_per_bait_per_sample.csv; rm results/coverage_breadth_per_bait_per_sample.csv; fi; echo \"sample,gene,exon_region,exon_read_count\" > results/coverage_breadth_per_bait_per_sample.csv; cd results; for dir in `echo *`; do if [[ -d $dir && -e ${dir}/exon_mean_read_count.csv ]]; then echo Merging sample $dir done; cd $dir;  tail -n+2 exon_mean_read_count.csv > TEMP; while read line; do echo ${dir},${line} >> ../coverage_breadth_per_bait_per_sample.csv; done < TEMP ; rm TEMP; cd ..; fi; done; cd .."
+end
+
+namespace :RPlot do
+  file "results/#{@sample}/Coverage_histogram.png" => ["results/#{@sample}/sample_bait_coverage_breadth_result.csv"] do
+    sh "source R-3.3.1; Rscript scripts/plot_coverage_breadth.r results/#{@sample}/sample_bait_coverage_breadth_result.csv #{@sample} results/#{@sample}/Coverage_histogram.png results/#{@sample}/Breadth_histogram.png 2>/dev/null "
+  end
+  file "results/#{@sample}/Breadth_histogram.png" => ["results/#{@sample}/sample_bait_coverage_breadth_result.csv"] do
+  end
+
+  task :plot_coverage_breadth => ["results/#{@sample}/Coverage_histogram.png", "results/#{@sample}/Breadth_histogram.png"] do
+    puts "Coverage and breadth % plotted"
+  end
+
+
+  task :Plot => [:plot_coverage_breadth] do
+    puts "Plotting completed"
+  end
+end
+
+namespace :normalization do
+  file "results/coverage_breadth_per_bait_per_sample.csv" => [:merge_sample_baits] do
+    #sh "source R-3.3.1; source xvfb-4.8; Xvfb :60 -screen 0 1024x768x24 & export DISPLAY=localhost:60.0; xvfb-run Rscript scripts/normalization.r"
+    sh "Rscript scripts/normalization.r"
+  end
+  task :run => ["results/coverage_breadth_per_bait_per_sample.csv"] do
+    puts "Normalization done"
+  end
+end
+
+
+task :negative_control_read_count => [ "normalization:run" ] do
+  puts "Getting read count mean only from -ve control baits"
+  sh "Rscript scripts/negative_control_read_count.r"
+end
+
+task :PoissonDistribution => [:negative_control_read_count] do
+  puts "Running poisson prabability distribution"
+  sh "Rscript scripts/poisson_probability_distribution.r"
+end
+
+task :atacr => [:merge_sample_baits] do
+  puts "Running ATACR package"
+  sh "Rscript scripts/atacr_pipeline.r"
+end
+
+task :clean_alignment do
+  sh "rm -r results/#{@sample}/* || true"
+end
+
+
+task :run_pipeline => [ "fastqc:run", "trimmomatic:run", "BWA:run", "samtools:run", "negative_control:get_negative_control"] do
+  puts "Pipeline completed"
+end
+
+
+task :Analysis => ["merge_sample_baits", "normalization:run", :negative_control_read_count, :poisson_distribution] do
+  puts "Analysis completed"
+end

@@ -1,0 +1,103 @@
+#!/bin/bash
+
+project=""
+reference=""
+job_queue="tsl-medium"
+rakefile=$(dirname $0)/run_analysis
+working_dir=`pwd`
+
+
+stage1=false
+stage2=false
+stage3=false
+
+function usage
+{
+cat << EOF
+usage: $0 -p projectdir -r reference -R rakefilename -j jobqueuename -w working_dir
+Run analysis on the project output folder after Illumina Nextera demultiplexing
+
+Options:
+	-p	Project folder name. It is the project name used in the sample sheet
+	-s	sample sheet
+	-r	Reference sequence FASTA file
+	-R	rake pipeline filename
+	-j	job queue name. Default: tsl-medium
+	-w	working directory. Default: Current directory
+	-1	run stage 1 - FASTQC, trimmomatic, mapping to reference, convert sam to bam, merge bam files
+	-2 	run stage 2 - merging bam files
+	-3	run stage 1 and 2 both
+	-h	show this help message
+
+EOF
+}
+
+
+# ----------------------------------------------------------------------
+# Main program
+# ----------------------------------------------------------------------
+
+# Loop through command line options
+while getopts p:s:r:R:j:w:123h OPTION
+do
+    case $OPTION in
+			p)	project=$OPTARG;;
+			r)	reference=$OPTARG;;
+			R)	rakefile=$OPTARG;;
+			j)	job_queue=$OPTARG;;
+			w)	working_dir=$OPTARG;;
+			1)	stage1=true;;
+			2)	stage2=true;;
+			3)	stage3=true;;
+			h)	usage; exit 1;;
+    esac
+done
+
+if $stage3; then stage1=true; fi
+
+cd $project
+
+for dir in *; do
+	if [ -d $dir ]; then
+
+		if $stage2; then
+			sbatch -p $job_queue -J ${dir}_mergebams --wrap "cd $working_dir; rake -f $rakefile reference=$reference sampleid=$dir samtools:multiple_merge"
+		fi
+
+		if $stage1; then
+
+			cd $dir;
+				dependency_list=""
+				for fastq in *_R?_00?.fastq.gz; do
+
+					lane=$(basename $fastq | sed 's/.*_\(L[0-9]\+\)_R[0-9]_.*/\1/')
+
+					#check if R2 exists
+					R2=$(echo $fastq | sed 's/_R1_/_R2_/')
+					if [ -e $R2 ]; then
+						jobid=$(sbatch -p $job_queue -o ${dir}"_"${lane}_rake.log -J ${dir}_rake --mem 10G --wrap "cd $working_dir; rake -f $rakefile R1=`pwd`/$fastq  R2=`pwd`/$R2 reference=$reference samplename=${dir}"_"${lane} sampleid=$dir fastqc:run trimmomatic:runPE Bowtie:runPE samtools:run | mv results/${dir}"_"${lane}_rake.log  ${dir}"_"${lane}/rake.log " | awk '{print $4}' )
+						echo sbatch -p $job_queue -o results/${dir}"_"${lane}/rake.log -J ${dir}_rake --mem 10G --wrap "cd $working_dir; rake -f $rakefile R1=`pwd`/$fastq  R2=`pwd`/$R2 reference=$reference samplename=${dir}"_"${lane} sampleid=$dir fastqc:run trimmomatic:runPE Bowtie:runPE samtools:run |mv results/${dir}"_"${lane}_rake.log results/${dir}"_"${lane}/rake.log "
+					else
+						jobid=$(sbatch -p $job_queue -o ${dir}"_"${lane}_rake.log -J ${dir}_rake --mem 10G --wrap "cd $working_dir; rake -f $rakefile R1=`pwd`/$fastq  reference=$reference samplename=${dir}"_"${lane} sampleid=$dir fastqc:runR1 trimmomatic:runSE Bowtie:runSE samtools:run | mv results/${dir}"_"${lane}_rake.log ${dir}"_"${lane}/rake.log " | awk '{print $4}' )
+						echo sbatch -p $job_queue -o ${dir}"_"${lane}_rake.log -J ${dir}_rake --mem 10G --wrap "cd $working_dir; rake -f $rakefile R1=`pwd`/$fastq  reference=$reference samplename=${dir}"_"${lane} sampleid=$dir fastqc:runR1 trimmomatic:runSE Bowtie:runSE samtools:run | mv results/${dir}"_"${lane}_rake.log ${dir}"_"${lane}/rake.log "
+					fi
+
+					echo "Submitted batch job $jobid"
+					dependency_list=$(echo ${jobid}":"${dependency_list})
+
+				done
+				jobid=$(sbatch -p tsl-short -o /dev/null --wrap "sleep 5" | awk '{print $4}' )
+				dependency_list=$(echo $dependency_list${jobid})
+			cd ..
+		fi
+
+		if $stage3; then
+
+			echo $dependency_list
+			#jobid=$(sbatch -p $job_queue -o ${dir}"_rake.log  -J ${dir}_rake --wrap "cd $working_dir; rake -f $rakefile R1=`pwd`/$fastq samplesheet=$samplesheet reference=$reference samplename=${dir}"_"${lane} sampleid=$dir fastqc:run trimmomatic:run Bowtie:run samtools:run" | awk '{print $4}')
+			sbatch --dependency=afterok:${dependency_list} -o ${dir}_rake.log -p $job_queue  -J ${dir}_mergebam --wrap "cd $working_dir; rake -f $rakefile reference=$reference sampleid=$dir samtools:multiple_merge | mv results/${dir}_rake.log ${dir}/rake.log"
+			echo sbatch --dependency=afterok:${dependency_list} -o ${dir}_rake.log -p $job_queue  -J ${dir}_mergebam --wrap "cd $working_dir; rake -f $rakefile reference=$reference sampleid=$dir samtools:multiple_merge | mv results/${dir}_rake.log ${dir}/rake.log"
+			
+		fi
+	fi
+done

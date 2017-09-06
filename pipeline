@@ -1,11 +1,14 @@
 #!/bin/bash
-
+source ruby-2.3.1
 project=""
 reference=""
+gtf=""
 job_queue="tsl-medium"
 rakefile=$(dirname $0)/run_analysis
 working_dir=`pwd`
-
+out_dir=working_dir
+memory="40G"
+number_of_samples_to_run="*"
 
 stage1=false
 stage2=false
@@ -21,12 +24,16 @@ Options:
 	-p	Project folder name. It is the project name used in the sample sheet
 	-s	sample sheet
 	-r	Reference sequence FASTA file
+	-g 	reference gff/gtf annotation file (Note: Chromosome naming has to be same in reference and GTF/GFF3)
+	-t	transcriptome index file
 	-R	rake pipeline filename
 	-j	job queue name. Default: tsl-medium
 	-w	working directory. Default: Current directory
 	-1	run stage 1 - FASTQC, trimmomatic, mapping to reference, convert sam to bam, merge bam files
 	-2 	run stage 2 - merging bam files
 	-3	run stage 1 and 2 both
+	-m	memory for each job (Default:3G)
+	-x	number of samples to process (Default: all samples)
 	-h	show this help message
 
 EOF
@@ -38,48 +45,60 @@ EOF
 # ----------------------------------------------------------------------
 
 # Loop through command line options
-while getopts p:s:r:R:j:w:123h OPTION
+while getopts p:s:r:R:j:g:t:w:o:123m:x:h OPTION
 do
     case $OPTION in
 			p)	project=$OPTARG;;
 			r)	reference=$OPTARG;;
+			g)	gtf=$OPTARG;;
+			t)	transcriptome_index=$OPTARG;;
 			R)	rakefile=$OPTARG;;
 			j)	job_queue=$OPTARG;;
 			w)	working_dir=$OPTARG;;
+			o)	out_dir=$OPTARG; out_dir=`pwd`/$out_dir;;
 			1)	stage1=true;;
 			2)	stage2=true;;
 			3)	stage3=true;;
+			m)	memory=$OPTARG;;
+			x)	number_of_samples_to_run=$OPTARG;;
 			h)	usage; exit 1;;
     esac
 done
 
 if $stage3; then stage1=true; fi
 
-cd $project
-
-for dir in *; do
+#cd $project
+count_number_of_samples_to_run=0
+for dir in ${project}/*; do
+	echo "Sample directory ", $dir
 	if [ -d $dir ]; then
 
 		if $stage2; then
-			sbatch -p $job_queue -J ${dir}_mergebams --wrap "cd $working_dir; rake -f $rakefile reference=$reference sampleid=$dir samtools:multiple_merge"
+			sbatch -p $job_queue -J ${dir}_mergebams --wrap "cd $working_dir; rake -f $rakefile reference=$reference sampleid=$dir tophat:multisample"
 		fi
 
 		if $stage1; then
 
 			cd $dir;
 				dependency_list=""
-				for fastq in *_R1_00?.fastq.gz; do
+				for fastq in ${dir}/*_R1_00?.fastq.gz; do
 
 					lane=$(basename $fastq | sed 's/.*_\(L[0-9]\+\)_R[0-9]_.*/\1/')
-
+					sample=$(basename $dir)
 					#check if R2 exists
 					R2=$(echo $fastq | sed 's/_R1_/_R2_/')
 					if [ -e $R2 ]; then
-						jobid=$(sbatch -p $job_queue -o ${dir}"_"${lane}_rake.log -J ${dir}_rake --mem 10G --wrap "cd $working_dir; rake -f $rakefile R1=`pwd`/$fastq  R2=`pwd`/$R2 reference=$reference samplename=${dir}"_"${lane} sampleid=$dir fastqc:run trimmomatic:runPE Bowtie:runPE samtools:runPE && mv ${dir}"_"${lane}_rake.log  results/${dir}"_"${lane}/rake.log " | awk '{print $4}' )
-						echo sbatch -p $job_queue -o ${dir}"_"${lane}/rake.log -J ${dir}_rake --mem 10G --wrap "cd $working_dir; rake -f $rakefile R1=`pwd`/$fastq  R2=`pwd`/$R2 reference=$reference samplename=${dir}"_"${lane} sampleid=$dir fastqc:run trimmomatic:runPE Bowtie:runPE samtools:runPE && mv ${dir}"_"${lane}_rake.log results/${dir}"_"${lane}/rake.log "
+						echo "Read2 exists " $R2
+						#command=$(echo sbatch -p $job_queue  -J ${sample}_rake --mem ${memory} --wrap \"cd $working_dir\; rake -f $rakefile R1=$fastq  R2=$R2 reference=$reference samplename=${sample}_${lane} sampleid=$sample gtf=$gtf fastqc:run trimmomatic:runPE tophat:run \")
+						jobid=$(sbatch -p $job_queue  -J ${sample}_rake --mem ${memory} -o ${working_dir}/${sample}_${lane}_rake.log --wrap "cd $working_dir; rake -f $rakefile R1=$fastq  R2=$R2 reference=$reference samplename=${sample}_${lane} sampleid=$sample gtf=$gtf transcriptome_index=$transcriptome_index fastqc:run trimmomatic:runPE tophat:run " | awk '{print $4}' )
+						#jobid=$command | awk '{print $4}'
+						#echo $command
 					else
-						jobid=$(sbatch -p $job_queue -o ${dir}"_"${lane}_rake.log -J ${dir}_rake --mem 10G --wrap "cd $working_dir; rake -f $rakefile R1=`pwd`/$fastq  reference=$reference samplename=${dir}"_"${lane} sampleid=$dir fastqc:runR1 trimmomatic:runSE Bowtie:runSE samtools:runSE && mv ${dir}"_"${lane}_rake.log results/${dir}"_"${lane}/rake.log " | awk '{print $4}' )
-						echo sbatch -p $job_queue -o ${dir}"_"${lane}_rake.log -J ${dir}_rake --mem 10G --wrap "cd $working_dir; rake -f $rakefile R1=`pwd`/$fastq  reference=$reference samplename=${dir}"_"${lane} sampleid=$dir fastqc:runR1 trimmomatic:runSE Bowtie:runSE samtools:runSE && mv ${dir}"_"${lane}_rake.log results/${dir}"_"${lane}/rake.log "
+						echo "Read2 does not exists for sample " $dir
+						#command=$(echo sbatch -p $job_queue  -J ${sample}_rake --mem ${memory} --wrap \"cd $working_dir\; rake -f $rakefile R1=$fastq  reference=$reference samplename=${sample}_${lane} sampleid=$sample gtf=$gtf fastqc:R1 trimmomatic:runSE tophat:runSE samtools:runSE \" )
+						jobid=$(sbatch -p $job_queue  -J ${sample}_rake --mem ${memory} -o ${working_dir}/${sample}_${lane}_rake.log --wrap "cd $working_dir; rake -f $rakefile R1=$fastq  reference=$reference samplename=${sample}_${lane} sampleid=$sample gtf=$gtf transcriptome_index=$transcriptome_index fastqc:R1 trimmomatic:runSE tophat:run "| awk '{print $4}' )
+						#jobid=$command | awk '{print $4}'}
+						#echo $command
 					fi
 
 					echo "Submitted batch job $jobid"
@@ -87,6 +106,7 @@ for dir in *; do
 
 				done
 				jobid=$(sbatch -p tsl-short -o /dev/null --wrap "sleep 5" | awk '{print $4}' )
+				echo "Submitted batch job $jobid"
 				dependency_list=$(echo $dependency_list${jobid})
 			cd ..
 		fi
@@ -95,9 +115,10 @@ for dir in *; do
 
 			echo $dependency_list
 			#jobid=$(sbatch -p $job_queue -o ${dir}"_rake.log  -J ${dir}_rake --wrap "cd $working_dir; rake -f $rakefile R1=`pwd`/$fastq samplesheet=$samplesheet reference=$reference samplename=${dir}"_"${lane} sampleid=$dir fastqc:run trimmomatic:run Bowtie:run samtools:run" | awk '{print $4}')
-			sbatch --dependency=afterok:${dependency_list} -o ${dir}_rake.log -p $job_queue  -J ${dir}_mergebam --wrap "cd $working_dir; rake -f $rakefile reference=$reference sampleid=$dir samtools:multiple_merge && mv ${dir}_rake.log results/${dir}/rake.log"
-			echo sbatch --dependency=afterok:${dependency_list} -o ${dir}_rake.log -p $job_queue  -J ${dir}_mergebam --wrap "cd $working_dir; rake -f $rakefile reference=$reference sampleid=$dir samtools:multiple_merge && mv ${dir}_rake.log results/${dir}/rake.log"
-
+			command=$(sbatch --dependency=afterok:${dependency_list}  -p $job_queue  -J ${dir}_mergebam --wrap \"cd $working_dir; rake -f $rakefile reference=$reference sampleid=$dir tophat:multisample\")
+			echo $"command"
 		fi
 	fi
+	count_number_of_samples_to_run=$((count_number_of_samples_to_run))
+	#if [[ $count_number_of_samples_to_run == $number_of_samples_to_run ]]; then break; fi
 done

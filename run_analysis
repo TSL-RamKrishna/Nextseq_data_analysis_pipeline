@@ -16,11 +16,23 @@ end
 ENV["samplename"] ? @sample=ENV["samplename"] : nil
 ENV["sampleid"] ? @sampleid=ENV["sampleid"] : nil
 ENV["reference"] ? @reference=ENV["reference"] : nil
+@reference ? @refindex = "#{@reference}".split(".")[0] : nil
+
 ENV["gtf"] ? @gtf=ENV["gtf"] : nil
-@gtf="" if @gtf.nil? || @gtf.empty?
+if (@gtf == nil || @gtf == "")
+  @gtf=""
+else
+  @gtf=" --GTF " + @gtf
+end
 
 ENV["transcriptome_index"] ? @transcriptome_index=ENV["transcriptome_index"] : nil
-@transcriptome_index="" if @transcriptome_index.nil? || @transcriptome_index.empty?
+if (@transcriptome_index == nil || @transcriptome_index == "")
+  @transcriptome_index=""
+else
+  @Tindex="#{@transcriptome_index}".split(".")[0]
+  @transcriptome_index_for_cmd=" --transcriptome-index " + @Tindex
+  #puts "#{@Tindex} #{@transcriptome_index_for_cmd}"
+end
 
 directory  "results"
 
@@ -62,7 +74,7 @@ end
 
 
 namespace :trimmomatic do
-  desc "Runs Trimmomati c quality trimming tool"
+  desc "Runs Trimmomatic quality trimming tool"
 
   file "results/#{@sample}/#{@R1_basename}.fastq" => ["#{@read1}"] do
     sh "source trimmomatic-0.36; source jre-1.7.0.11; trimmomatic SE -threads 2 -phred33 -trimlog results/#{@sample}/trimmomatic.log -quiet #{@read1} results/#{@sample}/#{@R1_basename}.fastq ILLUMINACLIP:/tsl/software/testing/trimmomatic/0.36/x86_64/share/trimmomatic/adapters/ilmn_adapters.fa:2:30:10 SLIDINGWINDOW:10:20 MINLEN:50"
@@ -108,6 +120,8 @@ namespace :BWAindex do
   task :run => ["#{@reference}.amb", "#{@reference}.ann", "#{@reference}.bwt", "#{@reference}.pac", "#{@reference}.sa"] do
     puts "Reference indexing completed"
   end
+
+
 end
 
 namespace :BWA do
@@ -139,44 +153,58 @@ namespace :BowtieIndex do
  task :run => ["#{@reference}.1.bt2", "#{@reference}.2.bt2", "#{@reference}.3.bt2", "#{@reference}.4.bt2", "#{@reference}.rev.1.bt2", "#{@reference}.rev.2.bt2" ] do
    puts "Bowtie reference indexing completed"
  end
+
+ file "#{@refindex}.1.bt2" => ["#{@reference}"] do
+   sh "source bowtie2-2.1.0;  bowtie2-build -f   #{@reference}  #{@refindex} "
+ end
+ file "#{@refindex}.2.bt2" => ["#{@reference}"] do
+ end
+ file "#{@refindex}.3.bt2" => ["#{@reference}"] do
+ end
+ file "#{@refindex}.4.bt2" => ["#{@reference}"] do
+ end
+ file "#{@refindex}.rev.1.bt2" => ["#{@reference}"] do
+ end
+ file "#{@refindex}.rev.2.bt2" => ["#{@reference}"] do
+ end
+
+ task :tophat => ["#{@refindex}.1.bt2", "#{@refindex}.2.bt2", "#{@refindex}.3.bt2", "#{@refindex}.4.bt2", "#{@refindex}.rev.1.bt2", "#{@refindex}.rev.2.bt2"]
+
 end
 
 namespace :Bowtie do
+
+
  file "results/#{@sample}/#{@sampleid}_aligned.sam" => ["#{@reference}", "results/#{@sample}/#{@R1_basename}.fastq"] do
   sh "source bowtie2-2.1.0; bowtie2 -q --phred33 -k 1 --reorder --very-sensitive-local --no-unal --rg-id #{@sampleid} --rg \"platform:Illumina\" --no-unal -x #{@reference} -U  results/#{@sample}/#{@R1_basename}.fastq -S results/#{@sample}/#{@sampleid}_aligned.sam 2> results/#{@sample}/#{@sampleid}_aligned.log; "
+ end
+
+ file "results/#{@sample}/#{@sampleid}_aligned.bam" => ["samtools:indexreference", "results/#{@sample}/#{@sampleid}_aligned.sam"] do
+   sh "source samtools-1.3.1; samtools view -bS -t #{@reference}.dict -o results/#{@sample}/#{@sampleid}_aligned.bam results/#{@sample}/#{@sampleid}_aligned.sam"
  end
 
  file "results/#{@sample}/#{@sampleid}_paired_aligned.sam" => ["#{@reference}", "results/#{@sample}/#{@R1_basename}_paired.fastq",  "results/#{@sample}/#{@R2_basename}_paired.fastq"] do
   sh "source bowtie2-2.1.0; bowtie2 -q --phred33 -k 1 --reorder --very-sensitive-local --no-unal --rg-id #{@sampleid} --rg \"platform:Illumina\" --no-unal -x #{@reference} -1 results/#{@sample}/#{@R1_basename}_paired.fastq -2 results/#{@sample}/#{@R2_basename}_paired.fastq -S results/#{@sample}/#{@sampleid}_paired_aligned.sam 2> results/#{@sample}/#{@sampleid}_aligned.log; "
  end
 
- task :runSE => ["BowtieIndex:run", "results/#{@sample}/#{@sampleid}_aligned.sam"] do
+ file "results/#{@sample}/#{@sampleid}_paired_aligned.bam" => ["samtools:indexreference", "results/#{@sample}/#{@sampleid}_paired_aligned.sam" ] do
+   sh "source samtools-1.3.1; samtools view -bS -t #{@reference}.dict -o results/#{@sample}/#{@sampleid}_paired_aligned.bam results/#{@sample}/#{@sampleid}_paired_aligned.sam"
+ end
+
+
+
+ task :runSE => ["BowtieIndex:run", "results/#{@sample}/#{@sampleid}_aligned.sam", "results/#{@sample}/#{@sampleid}_aligned.bam" ] do
    puts "Bowtie mapping completed"
  end
 
- task :runPE => ["BowtieIndex:run", "results/#{@sample}/#{@sampleid}_paired_aligned.sam"] do
+ task :runPE => ["BowtieIndex:run", "results/#{@sample}/#{@sampleid}_paired_aligned.sam", "results/#{@sample}/#{@sampleid}_paired_aligned.bam"] do
    puts "Bowtie mapping completed"
  end
-
-
- multi_aligned_sam=FileList['results/#{@sampleid}_*/#{@sampleid}*aligned.sam']
- multi_aligned_bam=multi_aligned_sam.pathmap("%x")
- puts "#{multi_aligned_sam}" "#{multi_aligned_bam}"
-
- multi_aligned_bam.zip(multi_aligned_sam).each do |target, source|
-   file target =>  [source] do
-     sh "echo #{source} #{target}"
-   end
-
- end
-
- multitask :convert_sam_to_bam => multi_aligned_bam
-
 
  directory "results/#{@sampleid}"
 
- file "results/#{@sampleid}/aligned_merged.bam" => ["convert_sam_to_bam", "results/#{@sampleid}", *multi_aligned_bam] do
-   sh "source samtools-1.3.1; samtools merge -r -u -f -c --reference #{@reference} results/#{@sampleid}/aligned_merged.bam `echo results/#{@sampleid}_*/#{@sampleid}*aligned.sam`"
+ file "results/#{@sampleid}/aligned_merged.bam" => ["convert_sam_to_bam", "results/#{@sampleid}" ] do
+   sh "source samtools-1.3.1; samtools merge -r -u -f -c --reference #{@reference} results/#{@sampleid}/aligned_merged.bam `echo results/#{@sampleid}_*/#{@sampleid}*aligned.bam`"
  end
  file "results/#{@sampleid}/aligned_merged_sorted.bam" => ["results/#{@sampleid}/aligned_merged.bam"] do
    sh "source samtools-1.3.1; samtools sort --reference #{@reference} -o results/#{@sampleid}/aligned_merged_sorted.bam results/#{@sampleid}/aligned_merged.bam"
@@ -193,18 +221,45 @@ namespace :Bowtie do
 
 end
 
+namespace :tophat_index do
+  file "#{@Tindex}.1.bt2" => ["#{@transcriptome_index}"] do
+    sh "source bowtie2-2.2.9; bowtie2-build #{@transcriptome_index} #{@Tindex}"
+  end
+  file "#{@Tindex}.2.bt2" => ["#{@transcriptome_index}"] do
+    sh "source bowtie2-2.2.9; bowtie2-build #{@transcriptome_index} #{@Tindex}"
+  end
+  file "#{@Tindex}.3.bt2" => ["#{@transcriptome_index}"] do
+    sh "source bowtie2-2.2.9; bowtie2-build #{@transcriptome_index} #{@Tindex}"
+  end
+  file "#{@Tindex}.4.bt2" => ["#{@transcriptome_index}"] do
+    sh "source bowtie2-2.2.9; bowtie2-build #{@transcriptome_index} #{@Tindex}"
+  end
+  file "#{@Tindex}.rev.1.bt2" => ["#{@transcriptome_index}"] do
+    sh "source bowtie2-2.2.9; bowtie2-build #{@transcriptome_index} #{@Tindex}"
+  end
+  file "#{@Tindex}.rev.2.bt2" => ["#{@transcriptome_index}"] do
+    sh "source bowtie2-2.2.9; bowtie2-build #{@transcriptome_index} #{@Tindex}"
+  end
+
+  task :transcriptome =>["#{@Tindex}.1.bt2","#{@Tindex}.2.bt2","#{@Tindex}.3.bt2","#{@Tindex}.4.bt2","#{@Tindex}.rev.1.bt2","#{@Tindex}.rev.2.bt2"]
+end
+
+
 namespace :tophat do
-  qc_files=FileList['results/#{@sample}/*.fastq']
-  file "results/#{@sample}/accepted_hits.bam.finished" => ["#{@reference}", *qc_files] do
-    sh "source tophat-2.1.1; source bowtie2-2.2.9; tophat --rg-id #{@sampleid} --rg-sample #{@sampleid} --rg-platform \"Illumina\" -i 25 -I 3000 --num-threads 3 --b2-sensitive #{@gtf} #{@transcriptome_index} --output-dir results/#{@sample} #{@reference} #{@fastq_files}"
+  qc_files=FileList["results/#{@sample}/*.fastq"]
+  tophat_input_files=qc_files.join(",")
+
+  file "results/#{@sample}/accepted_hits.bam" => ["#{@reference}", "BowtieIndex:tophat", "tophat_index:transcriptome"] do
+    sh "source tophat-2.1.1; source bowtie2-2.2.9; tophat --rg-id #{@sampleid} --rg-sample #{@sampleid} --rg-platform \"Illumina\" -i 25 -I 3000 --num-threads 3 --b2-sensitive #{@gtf} #{@transcriptome_index_for_cmd} --output-dir results/#{@sample} #{@refindex} #{tophat_input_files}"
   end
 
   desc "Run tophat mapping for single or paired end data"
-  task :run => ["BowtieIndex:run", "results/#{@sample}/accepted_hits.bam.finished"] do
+  task :run => ["results/#{@sample}/accepted_hits.bam"] do
     puts "Running Tophat completed"
   end
 
-  task :runPE => ["BowtieIndex:run", "results/#{@sample}/paired_end_accepted_hits.bam.finished"] do
+  #absolute task
+  task :runPE => ["BowtieIndex:run", "results/#{@sample}/accepted_hits.bam"] do
     puts "Running Tophat for paired end data"
   end
 
@@ -212,7 +267,7 @@ namespace :tophat do
   multi_accepted_hits=FileList['#{@sampleid}_*/accepted_hits.bam']
   directory "results/#{@sampleid}"
 
-  file "results/#{@sampleid}/merged_accepted_hits.bam" => ["results/#{@sampleid}", *multi_accepted_hits] do
+  file "results/#{@sampleid}/merged_accepted_hits.bam" => ["results/#{@sampleid}"] do
     sh "source samtools-1.3.1; samtools merge -r -u -f -c --reference #{@reference} results/#{@sampleid}/merged_accepted_hits.bam `echo results/#{@sampleid}_*/accepted_hits.bam`"
   end
   file "results/#{@sampleid}/merged_accepted_hits_sorted.bam" => ["results/#{@sampleid}/merged_accepted_hits.bam"] do
@@ -241,6 +296,8 @@ namespace :samtools do
   file "#{@reference}.fai" => ["#{@reference}"] do
     system "source samtools-1.3.1; samtools faidx #{@reference} > #{@reference}.fai"
   end
+
+  task :indexreference => ["#{@reference}.dict", "#{@reference}.fai"]
 
   desc "convert sam to bam for single end"
   file "results/#{@sample}/#{@sampleid}_aligned.bam" => ["#{@reference}.dict"] do

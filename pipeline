@@ -8,7 +8,7 @@ rakefile=$(dirname $0)/run_analysis
 working_dir=`pwd`
 out_dir=working_dir
 memory="10G"
-number_of_samples_to_run="*"
+number_of_samples_to_run=""
 
 stage1=false
 stage2=false
@@ -71,7 +71,7 @@ if $stage3; then stage1=true; fi
 count_number_of_samples_to_run=0
 for dir in ${project}/*; do
 	sampleid=$(basename $dir)
-	echo "Sample directory ", $dir
+
 	if [ -d $dir ]; then
 
 		if $stage2; then
@@ -95,7 +95,7 @@ for dir in ${project}/*; do
 						rakecmd="rake -f $rakefile R1=$fastq  R2=$R2 reference=$reference samplename=${sampleid}_${lane} sampleid=$sampleid gtf=$gtf transcriptome_index=$transcriptome_index fastqc:run trimmomatic:runPE tophat:run"
 						jobid=$(sbatch -p $job_queue  -J ${sampleid}_rake --mem ${memory} -o ${working_dir}/${sampleid}_${lane}_rake.log --wrap "cd $working_dir;  $rakecmd " | awk '{print $4}' )
 						#jobid=$command | awk '{print $4}'
-						#echo $rakecmd
+						echo $rakecmd
 					else
 						#echo "Read2 does not exists for sample " $dir
 						#command=$(echo sbatch -p $job_queue  -J ${sampleid}_rake --mem ${memory} --wrap \"cd $working_dir\; rake -f $rakefile R1=$fastq  reference=$reference samplename=${sampleid}_${lane} sampleid=$sampleid gtf=$gtf fastqc:R1 trimmomatic:runSE tophat:runSE samtools:runSE \" )
@@ -124,6 +124,8 @@ for dir in ${project}/*; do
 			echo $rakecmd
 		fi
 	fi
-	count_number_of_samples_to_run=$((count_number_of_samples_to_run + 1))
-	if [[ $count_number_of_samples_to_run -eq $number_of_samples_to_run ]]; then break; fi
+	if [[ "$number_of_samples_to_run" != "" ]]; then
+		count_number_of_samples_to_run=$((count_number_of_samples_to_run + 1))
+		if [[ $count_number_of_samples_to_run -eq $number_of_samples_to_run ]]; then break; fi
+	fi
 done

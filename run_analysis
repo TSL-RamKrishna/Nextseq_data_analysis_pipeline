@@ -204,7 +204,7 @@ namespace :Bowtie do
  directory "results/#{@sampleid}"
 
  file "results/#{@sampleid}/aligned_merged.bam" => ["convert_sam_to_bam", "results/#{@sampleid}" ] do
-   sh "source samtools-1.3.1; samtools merge -r -u -f -c --reference #{@reference} results/#{@sampleid}/aligned_merged.bam `echo results/#{@sampleid}_*/#{@sampleid}*aligned.bam`"
+   sh "source samtools-1.3.1; samtools merge -r -f -c --reference #{@reference} results/#{@sampleid}/aligned_merged.bam `echo results/#{@sampleid}_*/#{@sampleid}*aligned.bam`"
  end
  file "results/#{@sampleid}/aligned_merged_sorted.bam" => ["results/#{@sampleid}/aligned_merged.bam"] do
    sh "source samtools-1.3.1; samtools sort --reference #{@reference} -o results/#{@sampleid}/aligned_merged_sorted.bam results/#{@sampleid}/aligned_merged.bam"

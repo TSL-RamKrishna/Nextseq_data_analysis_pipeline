@@ -18,6 +18,8 @@ ENV["sampleid"] ? @sampleid=ENV["sampleid"] : nil
 ENV["reference"] ? @reference=ENV["reference"] : nil
 @reference ? @refindex = "#{@reference}".split(".")[0] : nil
 
+
+
 ENV["gtf"] ? @gtf=ENV["gtf"] : nil
 if (@gtf == nil || @gtf == "")
   @gtf=""
@@ -168,7 +170,9 @@ namespace :BowtieIndex do
  file "#{@refindex}.rev.2.bt2" => ["#{@reference}"] do
  end
 
- task :tophat => ["#{@refindex}.1.bt2", "#{@refindex}.2.bt2", "#{@refindex}.3.bt2", "#{@refindex}.4.bt2", "#{@refindex}.rev.1.bt2", "#{@refindex}.rev.2.bt2"]
+ task :tophat => ["#{@refindex}.1.bt2", "#{@refindex}.2.bt2", "#{@refindex}.3.bt2", "#{@refindex}.4.bt2", "#{@refindex}.rev.1.bt2", "#{@refindex}.rev.2.bt2"] do
+   puts "Tophat indexing for reference sequence completed."
+ end
 
 end
 
@@ -176,7 +180,7 @@ namespace :Bowtie do
 
 
  file "results/#{@sample}/#{@sampleid}_aligned.sam" => ["#{@reference}", "results/#{@sample}/#{@R1_basename}.fastq"] do
-  sh "source bowtie2-2.1.0; bowtie2 -q --phred33 -k 1 --reorder --very-sensitive-local --no-unal --rg-id #{@sampleid} --rg \"platform:Illumina\" --no-unal -x #{@reference} -U  results/#{@sample}/#{@R1_basename}.fastq -S results/#{@sample}/#{@sampleid}_aligned.sam 2> results/#{@sample}/#{@sampleid}_aligned.log; "
+  sh "source bowtie2-2.1.0; bowtie2 -q --phred33 -k 1 --reorder --very-sensitive-local --no-unal --rg-id #{@sampleid} --rg \"platform:Illumina\" --no-unal -x #{@reference} -U  results/#{@sample}/#{@R1_basename}.fastq -S results/#{@sample}/#{@sampleid}_aligned.sam 2> results/#{@sample}/#{@sampleid}_aligned.log "
  end
 
  file "results/#{@sample}/#{@sampleid}_aligned.bam" => ["samtools:indexreference", "results/#{@sample}/#{@sampleid}_aligned.sam"] do
@@ -184,14 +188,12 @@ namespace :Bowtie do
  end
 
  file "results/#{@sample}/#{@sampleid}_paired_aligned.sam" => ["#{@reference}", "results/#{@sample}/#{@R1_basename}_paired.fastq",  "results/#{@sample}/#{@R2_basename}_paired.fastq"] do
-  sh "source bowtie2-2.1.0; bowtie2 -q --phred33 -k 1 --reorder --very-sensitive-local --no-unal --rg-id #{@sampleid} --rg \"platform:Illumina\" --no-unal -x #{@reference} -1 results/#{@sample}/#{@R1_basename}_paired.fastq -2 results/#{@sample}/#{@R2_basename}_paired.fastq -S results/#{@sample}/#{@sampleid}_paired_aligned.sam 2> results/#{@sample}/#{@sampleid}_aligned.log; "
+  sh "source bowtie2-2.1.0; bowtie2 -q --phred33 -k 1 --reorder --very-sensitive-local --no-unal --rg-id #{@sampleid} --rg \"platform:Illumina\" --no-unal -x #{@reference} -1 results/#{@sample}/#{@R1_basename}_paired.fastq -2 results/#{@sample}/#{@R2_basename}_paired.fastq -S results/#{@sample}/#{@sampleid}_paired_aligned.sam 2> results/#{@sample}/#{@sampleid}_aligned.log "
  end
 
  file "results/#{@sample}/#{@sampleid}_paired_aligned.bam" => ["samtools:indexreference", "results/#{@sample}/#{@sampleid}_paired_aligned.sam" ] do
    sh "source samtools-1.3.1; samtools view -bS -t #{@reference}.dict -o results/#{@sample}/#{@sampleid}_paired_aligned.bam results/#{@sample}/#{@sampleid}_paired_aligned.sam"
  end
-
-
 
  task :runSE => ["BowtieIndex:run", "results/#{@sample}/#{@sampleid}_aligned.sam", "results/#{@sample}/#{@sampleid}_aligned.bam" ] do
    puts "Bowtie mapping completed"
@@ -203,8 +205,10 @@ namespace :Bowtie do
 
  directory "results/#{@sampleid}"
 
- file "results/#{@sampleid}/aligned_merged.bam" => ["convert_sam_to_bam", "results/#{@sampleid}" ] do
-   sh "source samtools-1.3.1; samtools merge -r -f -c --reference #{@reference} results/#{@sampleid}/aligned_merged.bam `echo results/#{@sampleid}_*/#{@sampleid}*aligned.bam`"
+ bamfiles=FileList["results/#{@sampleid}_*/*aligned.bam"]
+
+ file "results/#{@sampleid}/aligned_merged.bam" => bamfiles do
+   sh "source samtools-1.3.1; samtools merge -r -f -c --reference #{@reference} results/#{@sampleid}/aligned_merged.bam #{bamfiles}"
  end
  file "results/#{@sampleid}/aligned_merged_sorted.bam" => ["results/#{@sampleid}/aligned_merged.bam"] do
    sh "source samtools-1.3.1; samtools sort --reference #{@reference} -o results/#{@sampleid}/aligned_merged_sorted.bam results/#{@sampleid}/aligned_merged.bam"
@@ -217,7 +221,7 @@ namespace :Bowtie do
  task :multi_bam_index => ["results/#{@sampleid}/aligned_merged_sorted.bam.bai"]
 
  desc "Merge, Sort and Index multiple samples after Tophat mapping"
- task :multisample => ["multi_bam_merge", "multi_bam_sort", "multi_bam_index"]
+ task :multisample => ["results/#{@sampleid}", "multi_bam_merge", "multi_bam_sort", "multi_bam_index"]
 
 end
 
@@ -267,8 +271,8 @@ namespace :tophat do
   multi_accepted_hits=FileList['#{@sampleid}_*/accepted_hits.bam']
   directory "results/#{@sampleid}"
 
-  file "results/#{@sampleid}/merged_accepted_hits.bam" => ["results/#{@sampleid}"] do
-    sh "source samtools-1.3.1; samtools merge -r -u -f -c --reference #{@reference} results/#{@sampleid}/merged_accepted_hits.bam `echo results/#{@sampleid}_*/accepted_hits.bam`"
+  file "results/#{@sampleid}/merged_accepted_hits.bam" => multi_accepted_hits do
+    sh "source samtools-1.3.1; samtools merge -r -f -c --reference #{@reference} results/#{@sampleid}/merged_accepted_hits.bam #{multi_accepted_hits}"
   end
   file "results/#{@sampleid}/merged_accepted_hits_sorted.bam" => ["results/#{@sampleid}/merged_accepted_hits.bam"] do
     sh "source samtools-1.3.1; samtools sort --reference #{@reference} -o results/#{@sampleid}/merged_accepted_hits_sorted.bam results/#{@sampleid}/merged_accepted_hits.bam"
@@ -281,7 +285,7 @@ namespace :tophat do
   task :multi_bam_index => ["results/#{@sampleid}/merged_accepted_hits_sorted.bam"]
 
   desc "Merge, Sort and Index multiple samples after Tophat mapping"
-  task :multisample => ["multi_bam_merge", "multi_bam_sort", "multi_bam_index"]
+  task :multisample => ["results/#{@sampleid}", "multi_bam_merge", "multi_bam_sort", "multi_bam_index"]
 
 end
 
@@ -379,38 +383,7 @@ namespace :samtools do
 
 
 
-  #merging multiple bam files from same sample, sort and index
-  directory "results/#{@sampleid}"
-  file "results/#{@sampleid}/aligned_merged.bam" => ["results/#{@sampleid}"] do
-    system "bash merge_bamfiles.sh #{@sampleid} #{@reference}"
 
-  end
-
-  file "results/#{@sampleid}/aligned_merged_sorted.bam" => ["results/#{@sampleid}/aligned_merged.bam"] do
-    system "source samtools-1.3.1; samtools sort --reference #{@reference} -o results/#{@sampleid}/aligned_merged_sorted.bam results/#{@sampleid}/aligned_merged.bam "
-  end
-
-  file "results/#{@sampleid}/aligned_merged_sorted.bam.bai" => ["results/#{@sampleid}/aligned_merged_sorted.bam"] do
-    system "source samtools-1.3.1; samtools index -b results/#{@sampleid}/aligned_merged_sorted.bam results/#{@sampleid}/aligned_merged_sorted.bam.bai"
-  end
-
-  task :merge_bams => [ "results/#{@sampleid}/aligned_merged.bam" ] do
-    puts "#{@sampleid} merge completed"
-  end
-
-  task :merge_sorted_bam => [ "results/#{@sampleid}/aligned_merged_sorted.bam" ] do
-    puts "Merge of the combined BAM completed"
-  end
-
-  task :index_merged_sorted_bam => "results/#{@sampleid}/aligned_merged_sorted.bam.bai" do
-    puts "Merged BAM file indexed"
-  end
-
-
-
-  task :multiple_merge => [:merge_bams, :merge_sorted_bam, :index_merged_sorted_bam] do
-    puts "#{@sampleid} Bam files merged, sorted and indexed"
-  end
 
 end
 
@@ -500,7 +473,7 @@ task :clean_alignment do
 end
 
 
-task :run_pipeline => [ "fastqc:run", "trimmomatic:run", "BWA:run", "samtools:run", "negative_control:get_negative_control"] do
+task :run_pipeline => [ "fastqc:run", "trimmomatic:run", "Bowtie:runPE", "samtools:run"] do
   puts "Pipeline completed"
 end
 

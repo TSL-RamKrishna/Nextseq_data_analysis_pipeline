@@ -1,0 +1,28 @@
+#!/bin/bash
+
+project=$1
+trim_out_dir=`pwd`/$2
+job_queue=$3
+
+
+dependency_list=""
+
+cd $project
+
+for dir in *; do
+	mkdir -p ${trim_out_dir}/$dir
+	cd $dir;
+		for fastq in *_R?_00?.fastq.gz; do
+			jobid=$(sbatch -p $job_queue -o /dev/null -J rakeFASTQC --wrap "trimmomatic SE -phred33 -trimlog $trim_out_dir/${dir}/trim.log -quiet $fastq | awk '{print $4}')
+			dependency_list=$(echo $jobid,$dependency_list)
+			echo "Jobs submitted $jobid"
+		done
+	cd ..
+done
+
+cd $trim_out_dir
+
+jobid=$(sbatch -p $job_queue --wrap "sleep 3" | awk '{print $4}')
+dependency_list=$(echo $dependency_list$jobid)
+echo $dependency_list
+
